@@ -10,6 +10,9 @@ def is_pdf(file_src: Path) -> bool:
 
     return False
 
+def fix_filepath(fp: Path) -> Path:
+    return fp.expanduser().absolute()
+
 def ensure_proper_config(config):
     if 'watch_folder_list' not in config.keys():
         config['watch_folder_list'] = []

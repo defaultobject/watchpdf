@@ -7,8 +7,9 @@ from watchdog.events import LoggingEventHandler, FileSystemEventHandler, FileCre
 import time
 from pathlib import Path
 import pdfrenamer
+from typing import Optional
 
-from .utils import load_config_file, is_pdf, write_config
+from .utils import load_config_file, is_pdf, write_config, fix_filepath
 
 app = typer.Typer()
 
@@ -72,7 +73,7 @@ def add(ctx: typer.Context, watch_folder):
 
     watch_folder = Path(watch_folder)
     # ensure a proper path and replace ~ with home dire
-    watch_folder = str(watch_folder.expanduser().absolute())
+    watch_folder = str(fix_filepath(watch_folder))
     
     config: dict = load_config_file()
 
@@ -90,15 +91,19 @@ def clear_watch_folders(ctx: typer.Context):
     write_config(config)
 
 @app.command()
-def scan(ctx: typer.Context):
+def scan(ctx: typer.Context, folder_path: Optional[str] = None):
     # update all pdfs in the watch folders
     config = ctx.obj
-    if len(config['watch_folder_list']) == 0:
+    if (len(config['watch_folder_list']) == 0) and (folder_path == None):
         print('Nothing to watch!')
         return 
 
-    for f in config['watch_folder_list']:
-        pdfrenamer.main.rename(f, format=config['format'])
+    if folder_path is not None:
+        folder_path = str(fix_filepath(Path(folder_path)))
+        pdfrenamer.main.rename(folder_path, format=config['format'])
+    else:
+        for f in config['watch_folder_list']:
+            pdfrenamer.main.rename(f, format=config['format'])
 
 @app.callback()
 def global_state(ctx: typer.Context, verbose: bool = False, dry: bool = False):
