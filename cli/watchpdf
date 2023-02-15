@@ -1,0 +1,4 @@
+import watchpdf
+from watchpdf import main
+
+main.main()
