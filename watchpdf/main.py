@@ -12,8 +12,9 @@ import pdf2doi
 import pdfrenamer.config as config
 from pdfrenamer.filename_creators import build_filename, AllowedTags, check_format_is_valid
 import pdftitle
+import os
 
-try
+try:
     import sci_rename
     SCI_RENAME_IMPORTED = True
 except ImportError:
@@ -102,23 +103,37 @@ def get_new_filename(config, file_src) -> str:
 
     return new_file_name
 
+def rename_and_preserve_creation_time(file_src, new_file_name):
+    file_src = Path(file_src)
+    stat = os.stat(str(file_src))
+
+    new_path = pdfrenamer.main.rename_file(file_src, str(file_src.parents[0] / new_file_name), file_src.suffix)
+    new_path = Path(new_path)
+
+    os.utime(str(new_path), (stat.st_atime, stat.st_mtime))
+
+    print(f'{file_src} -> {new_path}')
+    return new_path 
+
 
 def update_file(config, file_src: Path):
     file_src = Path(file_src)
 
     if file_src in recently_created_list:
         recently_created_list.remove(file_src)
+        print(f'Already has been renames')
     else:
         new_file_name = get_new_filename(config, file_src)
 
         if new_file_name is not None:
             # if filename already matches then skip
             if new_file_name == Path(file_src).stem:
-                pass
+                print(f'No need to rename')
             else:
-                pdfrenamer.main.rename_file(file_src, str(file_src.parents[0] / new_file_name), file_src.suffix)
-
-            recently_created_list.add(new_file_name)
+                new_path = rename_and_preserve_creation_time(file_src, new_file_name)
+                recently_created_list.add(new_path)
+        else:
+            print(f'could not rename {new_file_name}')
 
 class NewFileEventHandler(FileSystemEventHandler):
     def __init__(self, config):
@@ -186,6 +201,13 @@ def clear_watch_folders(ctx: typer.Context):
     config['watch_folder_list'] = []
     write_config(config)
 
+def scan_folder(config, folder):
+    pathlist = Path(folder).glob('*')
+    for f in pathlist:
+        if is_pdf(f):
+            update_file(config, f)
+
+
 @app.command()
 def scan(ctx: typer.Context, folder_path: Optional[str] = None):
     # update all pdfs in the watch folders
@@ -194,12 +216,14 @@ def scan(ctx: typer.Context, folder_path: Optional[str] = None):
         print('Nothing to watch!')
         return 
 
+
     if folder_path is not None:
         folder_path = str(fix_filepath(Path(folder_path)))
-        pdfrenamer.main.rename(folder_path, format=config['format'])
+
+        scan_folder(config, folder_path)
     else:
         for f in config['watch_folder_list']:
-            pdfrenamer.main.rename(f, format=config['format'])
+            scan_folder(config, f)
 
 @app.callback()
 def global_state(ctx: typer.Context, verbose: bool = False, dry: bool = False):
