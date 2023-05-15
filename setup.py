@@ -10,7 +10,7 @@ setuptools.setup(
     description="Watch and rename accedmic papers",
     long_description="",
     long_description_content_type="text/markdown",
-    url="N/A",
+    url="https://github.com/defaultobject/watchpdf",
     packages=setuptools.find_packages(),
     scripts=["cli/watchpdf"],
     classifiers=[

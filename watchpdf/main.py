@@ -7,6 +7,18 @@ from watchdog.events import LoggingEventHandler, FileSystemEventHandler, FileCre
 import time
 from pathlib import Path
 import pdfrenamer
+import pdf2bib
+import pdf2doi
+import pdfrenamer.config as config
+from pdfrenamer.filename_creators import build_filename, AllowedTags, check_format_is_valid
+import pdftitle
+
+try
+    import sci_rename
+    SCI_RENAME_IMPORTED = True
+except ImportError:
+    SCI_RENAME_IMPORTED = False
+
 from typing import Optional
 
 from .utils import load_config_file, is_pdf, write_config, fix_filepath
@@ -16,13 +28,97 @@ app = typer.Typer()
 # events are handled sequentially
 recently_created_list = set([])
 
+# we do not trust pdf2doi web search methods
+pdf2doi.config.set('webvalidation',False)
+
+def try_pdf2bib(config, file_src):
+    new_file_name = None
+
+    try:
+        result = pdf2bib.pdf2bib_singlefile(str(file_src))
+
+        if result['method'] == 'title_google':
+            return None
+
+        if result['metadata'] and result['identifier']:
+            #closely following https://github.com/MicheleCotrufo/pdf-renamer/blob/master/pdfrenamer/main.py
+            # however we want control as to when we actually rename the file 
+            metadata = result['metadata'].copy()
+            metadata_string = "\n\t"+"\n\t".join([f"{key} = \"{metadata[key]}\"" for key in metadata.keys()] ) 
+
+            tags = check_format_is_valid(config['format'])
+            new_file_name = build_filename( metadata, config['format'], tags)
+        else:
+            return None
+
+    except Exception as e:
+        print(f'error when processing {file_src}')
+        print(e)
+        return None
+
+    return new_file_name
+
+def try_pdftitle(config, file_src):
+    try:
+        with open(file_src, 'rb') as f: 
+            title = pdftitle.get_title_from_io(f)
+
+        return title
+
+    except Exception as e:
+        print(f'error when processing {file_src}')
+        print(e)
+        return None
+
+def try_sci_rename(config, file_src):
+    global SCI_RENAME_IMPORTED
+
+    if not SCI_RENAME_IMPORTED:
+        return None
+
+    new_file_name = None
+    try:
+        new_file_name = sci_rename.search_candidate_title(str(file_src.parents[0]), file_src.name)
+
+        if new_file_name is not None:
+            # remove pdf ext
+            new_file_name = Path(new_file_name).stem
+
+    except Exception as e:
+        print(f'error when processing {file_src}')
+        print(e)
+        return None
+
+    return new_file_name
+
+def get_new_filename(config, file_src) -> str:
+    new_file_name = try_pdf2bib(config, file_src)
+
+    if new_file_name is None:
+        new_file_name = try_pdftitle(config, file_src)
+
+    if new_file_name is None:
+        new_file_name = try_sci_rename(config, file_src)
+
+    return new_file_name
+
+
 def update_file(config, file_src: Path):
+    file_src = Path(file_src)
+
     if file_src in recently_created_list:
         recently_created_list.remove(file_src)
     else:
-        result = pdfrenamer.main.rename(str(file_src), format=config['format'])
-        new_file_name = result['path_new']
-        recently_created_list.add(new_file_name)
+        new_file_name = get_new_filename(config, file_src)
+
+        if new_file_name is not None:
+            # if filename already matches then skip
+            if new_file_name == Path(file_src).stem:
+                pass
+            else:
+                pdfrenamer.main.rename_file(file_src, str(file_src.parents[0] / new_file_name), file_src.suffix)
+
+            recently_created_list.add(new_file_name)
 
 class NewFileEventHandler(FileSystemEventHandler):
     def __init__(self, config):
